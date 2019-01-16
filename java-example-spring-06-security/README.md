@@ -190,14 +190,183 @@ eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJVc2VySWQiOjEyMywiVXNlck5hbWUiOiJhZG1pbiJ
 
 ```
 
-#### 1.2 创建简单Spring Boot应用程序
+#### 1.2 创建简单Spring Boot应用程序，并构建3个路由
 
 ``` java
 （代码略）
 ```
 
+![1547546814753](assets/1547546814753.png)
+
 ### 2. 创建com.example.cofig.MySecurityConfig.java
 
+如果需要Config生效，需要添加@EnableWebSecurity注解，并继承WebSecurityConfigurerAdapter类
 
+![1547546998934](assets/1547546998934.png)
 
-#### 1.1 构建用户yanzh
+#### 1.1 构建未登陆用户的验证
+
+##### 1.1.1 重写configure(HttpSecurity http)
+
+​	由于WebSecurityConfigurerAdapter中定义了用户验证的方法，因此我们需要重写这个方法，以满足自身业务需求。
+
+```java
+/*
+* WebSecurityConfigurerAdapter中的代码片段
+*/
+protected void configure(HttpSecurity http) throws Exception {
+    http
+        .authorizeRequests()
+        .anyRequest().authenticated()
+        .and()
+        .formLogin().and()
+        .httpBasic();
+}
+```
+
+​	在这个方法中，需要先设置不需要权限的访问路径。
+
+![1547548662345](assets/1547548662345.png)
+
+​	接下来我们添加一个filter，用来设置具体的权限验证规则。
+
+```java
+@Override
+protected void configure(HttpSecurity http) throws Exception {
+    http.cors().and().csrf().disable().authorizeRequests()
+        .antMatchers("/", "/login").permitAll()  // 表示这两个路径不需要权限
+        .anyRequest().authenticated()
+        .and().addFilter(new MyLoginFilter(authenticationManager()));
+}
+```
+
+**注意：**
+
+* MyLoginFilter(AuthenticationManager authenticationManager)是自定义的filter；
+* authenticationManager()被定义在WebSecurityConfigurerAdapter中，它会返回AuthenticationManager；
+
+##### 1.1.2 构建MyLoginFilter(AuthenticationManager authenticationManager)
+
+1.1.2.1 继承**spring security**的**UsernamePasswordAuthenticationFilter**；
+
+![1547549611157](assets/1547549611157.png)
+
+1.1.2.2 在MyLoginFilter中，**AuthenticationManager authenticationManager** 是私有属性，并且有一个带参的构造函数；
+
+![1547549729171](assets/1547549729171.png)
+
+1.1.2.3 接下来需要实现两个功能：
+
+* 获取并验证用户输入的密码；（attemptAuthentication）
+* 当验证通过后，做什么事情。（successfulAuthentication）
+
+1.1.2.3.1 **获取并验证用户输入的密码**
+
+![1547604784783](assets/1547604784783.png)
+
+这里还需要根据Spring Security的架构，实现两个接口：
+
+* UserDetailsService，用来定义从数据库中查找用户信息，并按Security的要求返回用户信息；
+
+* GrantedAuthority，将用户权限转化为Security要求的格式。
+
+  ``` java
+  package com.example.service.impl;
+  
+  import com.example.dao.mapper.MyUserMapper;
+  import com.example.exception.MyAuthException;
+  import com.example.po.UserPO;
+  import org.springframework.beans.factory.annotation.Autowired;
+  import org.springframework.security.core.userdetails.User;
+  import org.springframework.security.core.userdetails.UserDetails;
+  import org.springframework.security.core.userdetails.UserDetailsService;
+  import org.springframework.security.core.userdetails.UsernameNotFoundException;
+  import org.springframework.stereotype.Service;
+  
+  import java.util.Collections;
+  
+  /**
+   * 作用：在数据库中查找用户，并按照Security的要求返回用户信息
+   */
+  @Service
+  public class UserDetailsServiceImpl implements UserDetailsService {
+  
+      @Autowired
+      private MyUserMapper myUserMapper;
+  
+      @Override
+      public UserDetails loadUserByUsername(String s) throws UsernameNotFoundException {
+  
+          // 在数据库查询用户
+          UserPO userPO = myUserMapper.findUserByName(s);
+          if (userPO == null) {
+              new MyAuthException("User not find.");
+          }
+          User user = new User(userPO.getName(), userPO.getPassword(), Collections.emptyList());
+          return user;
+      }
+  }
+  
+  ```
+
+  ```java
+  package com.example.service.impl;
+  
+  import org.springframework.security.core.GrantedAuthority;
+  
+  /**
+   * 作用：将数据库中的Authority转成Security规定的Authority ??
+   */
+  public class GrantedAuthorityImpl implements GrantedAuthority {
+  
+      private String authority;
+  
+      public GrantedAuthorityImpl(String authority) {
+          this.authority = authority;
+      }
+  
+      public void setAuthority(String authority) {
+          this.authority = authority;
+      }
+  
+      @Override
+      public String getAuthority() {
+          return authority;
+      }
+  }
+  ```
+
+#### 2.2 构建用户授权
+
+在**MyLoginFilter**中重写successfulAuthentication方法,用来定义用户登陆后要做什么事情。
+
+```java
+/**
+* 作用：当用户登录成功后，Filter会调用此方法，因此可以在这里生成并返回token
+*/
+@Override
+protected void successfulAuthentication (HttpServletRequest request, HttpServletResponse response, FilterChain chain, Authentication authResult) throws IOException, ServletException {
+
+    long EXPIREATION_TIME = 5 * 60 * 60 * 1000; // 过期时间：5分钟
+    String SECRET = "P@ssw0rd";                 // JWT密码
+    String TOKEN_PREFIX = "Bearer ";             // Token前缀
+    String HEADER_STRING = "Authorization123";     // 存放Token的Header Key
+
+    /**
+         * JWT 的生成token的方法
+         */
+    // 生成JWT
+    String retToken = Jwts.builder()
+        .claim("authorities", "ROLE_ADMIN,AUTH_WRITE")
+        .setSubject(authResult.getName())
+        .setExpiration(new Date(System.currentTimeMillis() + EXPIREATION_TIME))
+        .signWith(SignatureAlgorithm.HS256, SECRET) // 加密方式
+        .compact();
+
+    response.addHeader(HEADER_STRING, TOKEN_PREFIX + retToken);
+}
+```
+
+#### 2.3 构建已登陆用户的验证
+
+**step 1.** 回到**MySecurityConfig**中，在configure(HttpSecurity http)方法中再增加一个filter

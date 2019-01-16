@@ -1,0 +1,12 @@
+com\example\filter\MyAuthenticationFilter.class
+com\example\service\impl\AuthenticationProviderImpl.class
+com\example\filter\MyLoginFilter.class
+com\example\App.class
+com\example\dao\mapper\impl\MyUserMapperImpl.class
+com\example\dao\mapper\MyUserMapper.class
+com\example\po\UserPO.class
+com\example\exception\MyAuthException.class
+com\example\controller\HelloController.class
+com\example\service\impl\GrantedAuthorityImpl.class
+com\example\config\MySecurityConfig.class
+com\example\service\impl\UserDetailsServiceImpl.class
